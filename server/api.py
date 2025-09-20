@@ -16,7 +16,7 @@ async def generate_mesh_b64(file: UploadFile = File(...), seed: int = 1):
         image = Image.open(io.BytesIO(data)).convert("RGB")
     except Exception:
         raise HTTPException(status_code=400, detail="invalid image")
-    glb_bytes = manager.generate_glb_bytes(image, seed=seed)
+    glb_bytes = await manager.generate_glb_bytes_async(image, seed=seed)
     return {"glb_b64": base64.b64encode(glb_bytes).decode("utf-8")}
 
 @router.post("/generate_mesh_file")
@@ -26,7 +26,7 @@ async def generate_mesh_file(file: UploadFile = File(...), seed: int = 1):
         image = Image.open(io.BytesIO(data)).convert("RGB")
     except Exception:
         raise HTTPException(status_code=400, detail="invalid image")
-    glb_bytes = manager.generate_glb_bytes(image, seed=seed)
+    glb_bytes = await manager.generate_glb_bytes_async(image, seed=seed)
     return StreamingResponse(
         io.BytesIO(glb_bytes),
         media_type="model/gltf-binary",
@@ -43,7 +43,7 @@ async def generate_mesh_from_text(
     if not prompt or not isinstance(prompt, str):
         raise HTTPException(status_code=400, detail="missing prompt")
 
-    glb_bytes = manager.generate_glb_bytes_from_text(prompt, seed=seed)
+    glb_bytes = await manager.generate_glb_bytes_from_text_async(prompt, seed=seed)
     return StreamingResponse(
         io.BytesIO(glb_bytes),
         media_type="model/gltf-binary",

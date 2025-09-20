@@ -23,10 +23,14 @@ class ModelManager:
         self.img_pipe: Optional[TrellisImageTo3DPipeline] = None
         self.txt_pipe: Optional[TrellisTextTo3DPipeline] = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._lock: Optional[asyncio.Lock] = None
 
     async def load(self):
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+
         if self.img_pipe is None or self.txt_pipe is None:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _load_image():
                 p = TrellisImageTo3DPipeline.from_pretrained("microsoft/TRELLIS-image-large")
@@ -49,6 +53,7 @@ class ModelManager:
         self.img_pipe = None
         self.txt_pipe = None
         torch.cuda.empty_cache()
+        self._lock = None
         print("Trellis pipelines unloaded")
 
     def _to_glb_bytes(self, outputs, simplify: float = 0.95, texture_size: int = 1024) -> bytes:
@@ -86,6 +91,44 @@ class ModelManager:
         outputs = self.txt_pipe.run(prompt, seed=seed)
         return self._to_glb_bytes(outputs, simplify=simplify, texture_size=texture_size)
 
+
+    async def generate_glb_bytes_async(
+        self,
+        image: Image.Image,
+        seed: int = 1,
+        simplify: float = 0.95,
+        texture_size: int = 1024,
+    ) -> bytes:
+        if self._lock is None:
+            raise RuntimeError("Model manager not initialized")
+
+        async with self._lock:
+            return await asyncio.to_thread(
+                self.generate_glb_bytes,
+                image,
+                seed,
+                simplify,
+                texture_size,
+            )
+
+    async def generate_glb_bytes_from_text_async(
+        self,
+        prompt: str,
+        seed: int = 1,
+        simplify: float = 0.95,
+        texture_size: int = 1024,
+    ) -> bytes:
+        if self._lock is None:
+            raise RuntimeError("Model manager not initialized")
+
+        async with self._lock:
+            return await asyncio.to_thread(
+                self.generate_glb_bytes_from_text,
+                prompt,
+                seed,
+                simplify,
+                texture_size,
+            )
 
 # a simple singleton used by the app
 manager = ModelManager()
