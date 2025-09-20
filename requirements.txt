@@ -1,8 +1,5 @@
 fastapi
 uvicorn[standard]
+python-multipart
 Pillow
-torch==2.5.1
-xformers==0.0.28.post3
-trellis
-spconv
 trimesh
