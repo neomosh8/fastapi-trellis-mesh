@@ -2,6 +2,7 @@
 import io
 import base64
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import Body
 from fastapi.responses import StreamingResponse
 from PIL import Image
 from .model_manager import manager
@@ -32,3 +33,19 @@ async def generate_mesh_file(file: UploadFile = File(...), seed: int = 1):
         headers={"Content-Disposition": 'attachment; filename="output.glb"'},
     )
 
+
+@router.post("/generate_mesh_from_text")
+async def generate_mesh_from_text(
+    payload: dict = Body(..., example={"prompt": "a small red fire hydrant", "seed": 1})
+):
+    prompt = payload.get("prompt")
+    seed = int(payload.get("seed", 1))
+    if not prompt or not isinstance(prompt, str):
+        raise HTTPException(status_code=400, detail="missing prompt")
+
+    glb_bytes = manager.generate_glb_bytes_from_text(prompt, seed=seed)
+    return StreamingResponse(
+        io.BytesIO(glb_bytes),
+        media_type="model/gltf-binary",
+        headers={"Content-Disposition": 'attachment; filename="output.glb"'},
+    )
