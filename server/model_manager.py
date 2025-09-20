@@ -53,7 +53,7 @@ class ModelManager:
             texture_size=texture_size,
         )
         buf = io.BytesIO()
-        glb.export(buf)
+        glb.export(buf, file_type="glb")
         buf.seek(0)
         return buf.read()
 
