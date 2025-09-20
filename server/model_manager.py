@@ -3,6 +3,12 @@ import asyncio
 from typing import Optional
 from PIL import Image
 import torch
+import os, sys
+
+# Point to your local TRELLIS source tree
+TRELLIS_SRC = os.environ.get("TRELLIS_SRC", "/tmp/TRELLIS/TRELLIS")
+if TRELLIS_SRC not in sys.path:
+    sys.path.append(TRELLIS_SRC)
 
 # Import from your local Trellis package that lives on the server
 # PYTHONPATH and editable install will make this import work there
