@@ -1,0 +1,113 @@
+Perfect. Here is the updated content **from Step 5 onward**, including a robust redeploy script and quick ops notes.
+
+# 5) Bash redeploy script
+
+Creates or updates a single command that pulls your API repo, installs deps only if `requirements.txt` changed, reloads systemd, restarts the service, and tails logs in real time. It does not touch your TRELLIS repo.
+
+```bash
+sudo tee /usr/local/bin/deploy-trellis-mesh.sh > /dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="/tmp/TRELLIS/service/fastapi-trellis-mesh"
+SERVICE="trellis-mesh"
+
+# Binaries from your conda env
+PY_BIN="/home/ubuntu/miniconda/envs/trellis/bin/python"
+PIP_BIN="/home/ubuntu/miniconda/envs/trellis/bin/pip"
+
+echo "[deploy] cd ${REPO_DIR}"
+cd "${REPO_DIR}"
+
+# Figure out the current branch, default to main if detached
+BRANCH="$(git rev-parse --abbrev-ref HEAD || echo main)"
+if [[ "${BRANCH}" == "HEAD" ]]; then
+  BRANCH="main"
+fi
+
+echo "[deploy] fetching"
+git fetch --all --prune
+
+echo "[deploy] resetting to origin/${BRANCH}"
+git reset --hard "origin/${BRANCH}"
+
+# Make sure the Python package path is clean inside the service process
+if [[ ! -f server/__init__.py ]]; then
+  echo "[deploy] creating server/__init__.py"
+  touch server/__init__.py
+fi
+
+# Install dependencies if requirements.txt changed since last deployment
+# Compare with one step back in reflog, ignore if first run
+if git rev-parse HEAD@{1} >/dev/null 2>&1; then
+  if git diff --quiet HEAD@{1} -- requirements.txt; then
+    echo "[deploy] requirements.txt unchanged"
+  else
+    echo "[deploy] installing updated requirements"
+    "${PIP_BIN}" install -r requirements.txt
+  fi
+else
+  echo "[deploy] first run, installing requirements"
+  "${PIP_BIN}" install -r requirements.txt
+fi
+
+echo "[deploy] systemd daemon-reload"
+sudo systemctl daemon-reload
+
+echo "[deploy] restarting ${SERVICE}"
+sudo systemctl restart "${SERVICE}"
+
+echo "[deploy] status"
+sudo systemctl --no-pager status "${SERVICE}" || true
+
+echo "[deploy] tailing logs. Ctrl C to stop."
+sudo journalctl -u "${SERVICE}" -f -n 100
+EOF
+
+sudo chmod +x /usr/local/bin/deploy-trellis-mesh.sh
+```
+
+Run anytime:
+
+```bash
+/usr/local/bin/deploy-trellis-mesh.sh
+```
+
+# 6) What the service expects at runtime
+
+* TRELLIS source stays at `/tmp/TRELLIS/TRELLIS`
+* The API reads `TRELLIS_SRC` from `/etc/trellis-mesh.env` and adds it to `sys.path` internally
+* Required envs are set in `/etc/trellis-mesh.env`
+
+  * `ATTN_BACKEND=xformers`
+  * `SPCONV_ALGO=native`
+  * `TRELLIS_SRC=/tmp/TRELLIS/TRELLIS`
+  * `PYTHONPATH=` must be empty
+* Uvicorn is managed by `trellis-mesh.service` and listens on `127.0.0.1:8000`
+* Nginx proxies port 80 to `127.0.0.1:8000` and is set as default\_server
+
+# 7) Quick ops cheat sheet
+
+```bash
+# service controls
+sudo systemctl start trellis-mesh
+sudo systemctl stop trellis-mesh
+sudo systemctl restart trellis-mesh
+sudo systemctl status trellis-mesh --no-pager
+
+# logs
+sudo journalctl -u trellis-mesh -f
+sudo journalctl -u trellis-mesh --since "10 min ago"
+
+# nginx
+sudo nginx -t && sudo systemctl reload nginx
+
+# redeploy API
+/usr/local/bin/deploy-trellis-mesh.sh
+
+# health
+curl -s http://127.0.0.1/health
+curl -s http://YOUR_PUBLIC_IP/health
+```
+
+If you want, I can add a tiny `deploy-and-health.sh` that runs the deploy then calls the health check and prints a clear pass or fail.
