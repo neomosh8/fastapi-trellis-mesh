@@ -1,54 +1,156 @@
+Here’s a clean **final README** you can drop into your repo. It documents project structure, environment variables, paths, and usage.
+
+---
+
 # Trellis Mesh FastAPI
 
-GPU model is loaded once at startup using FastAPI lifespan. One worker keeps it in memory for low latency. 
-On the server you will point PYTHONPATH and install your local Trellis repo in editable mode.
+FastAPI microservice for generating 3D meshes (GLB) from images using the **local Trellis repo**.
+The Trellis pipeline is loaded once at startup and kept in GPU memory for low latency inference.
 
-Docs references:
-- Lifespan startup and shutdown: https://fastapi.tiangolo.com/advanced/events/
-- UploadFile for file uploads: https://fastapi.tiangolo.com/tutorial/request-files/
-- Uvicorn workers guidance: https://fastapi.tiangolo.com/deployment/server-workers/
+---
 
-## Local dev on laptop
+## 📂 Project Structure
 
-python -m venv .venv
-source .venv/bin/activate
+```
+fastapi-trellis-mesh/
+├── README.md
+├── requirements.txt
+├── server/                   # FastAPI service code
+│   ├── __init__.py
+│   ├── main.py               # FastAPI app, lifespan startup/shutdown
+│   ├── api.py                # Endpoints
+│   ├── model_manager.py      # Loads and manages Trellis pipeline
+│   ├── schemas.py            # Pydantic models (optional)
+│   └── utils.py              # Helpers (optional)
+```
+
+> Note: The package was renamed from `app` → `server` to avoid collisions with `app.py` inside Trellis repo.
+
+---
+
+## ⚙️ Required Environment Variables
+
+These must be set before running the API:
+
+```bash
+# Required Trellis backend configs
+export ATTN_BACKEND=xformers      # Alternatives: flash-attn, xformers
+export SPCONV_ALGO=native         # Alternatives: auto, implicit_gemm, native
+
+# Path to your local Trellis repo (default already matches server path)
+export TRELLIS_SRC=/tmp/TRELLIS/TRELLIS
+```
+
+Optional for PyTorch compilation warnings:
+
+```bash
+export TORCH_CUDA_ARCH_LIST="8.0"   # or match your GPU compute capability
+```
+
+---
+
+## 📦 Dependencies
+
+Install only the lightweight API dependencies:
+
+```bash
 pip install -r requirements.txt
+```
 
-# You can run "uvicorn app.main:app --reload" but generation needs GPU and Trellis repo.
-# Use the server for actual inference.
+Contents of `requirements.txt`:
 
-## Deploy to server
+```
+fastapi
+uvicorn[standard]
+python-multipart
+Pillow
+trimesh
+```
 
-# on server, keep using your working conda env
-conda activate trellis
+---
 
-# clone this repo into /tmp/TRELLIS/service
-cd /tmp/TRELLIS
-mkdir -p service
-cd service
-git clone <YOUR_REPO_URL> .
-pip install -r requirements.txt
+## 🖥️ Linking Local Trellis Repo
 
-# make your local Trellis code importable
-pip install -e /tmp/TRELLIS/TRELLIS   # editable install of the local trellis package
+The API does **not** use PyPI’s broken `trellis` package.
+Instead, it loads your local Trellis code:
 
-# set the backends you already validated
-export ATTN_BACKEND=xformers
-export SPCONV_ALGO=native
+```bash
+# Make Trellis repo importable by the API
+# (do NOT edit Trellis repo itself)
+export TRELLIS_SRC=/tmp/TRELLIS/TRELLIS
+```
 
-# make sure Python can see your local package path
-export PYTHONPATH=/tmp/TRELLIS/TRELLIS:$PYTHONPATH
+The `server/model_manager.py` includes a shim:
 
-# run with a single worker so the model is loaded once into VRAM
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+```python
+TRELLIS_SRC = os.environ.get("TRELLIS_SRC", "/tmp/TRELLIS/TRELLIS")
+if TRELLIS_SRC not in sys.path:
+    sys.path.append(TRELLIS_SRC)
+```
 
-## Test
+This ensures imports like:
 
+```python
+from trellis.pipelines import TrellisImageTo3DPipeline
+```
+
+work correctly without polluting global `PYTHONPATH`.
+
+---
+
+## 🚀 Running the API
+
+From inside the repo folder:
+
+```bash
+unset PYTHONPATH   # avoid collision with /tmp/TRELLIS/TRELLIS/app.py
+
+uvicorn server.main:app \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --workers 1
+```
+
+**Why 1 worker?** Each worker loads the model into GPU memory. Multiple workers duplicate VRAM usage. For a single GPU, use `--workers 1`.
+
+---
+
+## 🧪 Endpoints
+
+### Health Check
+
+```bash
+curl http://localhost:8000/health
+# {"status": "ok"}
+```
+
+### Generate Mesh (download as file)
+
+```bash
 curl -X POST "http://localhost:8000/generate_mesh_file?seed=1" \
   -F "file=@/tmp/TRELLIS/TRELLIS/assets/example_image/T.png" \
   -o sample.glb
+```
 
-# or base64 JSON variant
+### Generate Mesh (base64 JSON)
+
+```bash
 curl -X POST "http://localhost:8000/generate_mesh_b64?seed=1" \
   -F "file=@/tmp/TRELLIS/TRELLIS/assets/example_image/T.png" \
   | jq -r .glb_b64 | base64 -d > sample.glb
+```
+
+---
+
+## 📝 Notes
+
+* **Startup**: The Trellis pipeline is loaded once in FastAPI’s `lifespan` startup hook.
+* **Shutdown**: VRAM is cleared with `torch.cuda.empty_cache()` when the app exits.
+* **Export Fix**: We explicitly call `glb.export(file_type="glb")` so trimesh writes valid GLB bytes.
+* **Local only**: This repo is API glue. Trellis itself stays at `/tmp/TRELLIS/TRELLIS`.
+
+---
+
+👉 Next steps: if you want to run this in Docker, I can prepare a GPU-ready `Dockerfile` using `nvidia/cuda:12.1-runtime-ubuntu22.04`.
+
+Do you also want me to include a **docker-compose.yaml** so you can run with GPUs easily on the server?
